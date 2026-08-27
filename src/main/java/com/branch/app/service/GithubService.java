@@ -103,18 +103,40 @@ public class GithubService {
         }
     }
 
+    private static final int REPOS_PER_PAGE = 100;
+
     private List<GithubApiRepo> fetchRepos(String username) {
+        List<GithubApiRepo> allRepos = new java.util.ArrayList<>();
+        int page = 1;
+
         try {
-            GithubApiRepo[] repos = restClient.get()
-                    .uri("/users/{username}/repos", username)
-                    .retrieve()
-                    .body(GithubApiRepo[].class);
-            return repos != null ? Arrays.asList(repos) : List.of();
+            while (true) {
+                final int currentPage = page;
+                GithubApiRepo[] repos = restClient.get()
+                        .uri("/users/{username}/repos?per_page={perPage}&page={page}",
+                                username, REPOS_PER_PAGE, currentPage)
+                        .retrieve()
+                        .body(GithubApiRepo[].class);
+
+                if (repos == null || repos.length == 0) {
+                    break;
+                }
+
+                allRepos.addAll(Arrays.asList(repos));
+
+                if (repos.length < REPOS_PER_PAGE) {
+                    break;
+                }
+
+                page++;
+            }
         } catch (HttpClientErrorException.NotFound e) {
             throw new NotFoundException("GitHub User not found: " + username);
         } catch (HttpClientErrorException.Forbidden e) {
             throw buildRateLimitException(e);
         }
+
+        return allRepos;
     }
 
     private RuntimeException buildRateLimitException(HttpClientErrorException.Forbidden e) {

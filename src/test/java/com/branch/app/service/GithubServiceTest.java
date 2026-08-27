@@ -64,6 +64,8 @@ class GithubServiceTest {
             ]
             """;
 
+    private static final String REPOS_EMPTY_JSON = "[]";
+
     @BeforeEach
     void setUp() {
         ObjectMapper objectMapper = new ObjectMapper()
@@ -108,7 +110,7 @@ class GithubServiceTest {
 
         mockServer.expect(requestTo("https://api.github.com/users/octocat"))
                 .andRespond(withSuccess(USER_JSON, MediaType.APPLICATION_JSON));
-        mockServer.expect(requestTo("https://api.github.com/users/octocat/repos"))
+        mockServer.expect(requestTo("https://api.github.com/users/octocat/repos?per_page=100&page=1"))
                 .andRespond(withSuccess(REPOS_JSON, MediaType.APPLICATION_JSON));
 
         GithubUser result = service.getUser("octocat");
@@ -166,6 +168,58 @@ class GithubServiceTest {
     }
 
     @Test
+    void getUser_cacheMiss_paginatesUntilPartialPage() {
+        when(valueOps.get("github:user:octocat")).thenReturn(null);
+
+        String page1Json = buildReposJson(100, 0);
+        String page2Json = buildReposJson(50, 100);
+
+        mockServer.expect(requestTo("https://api.github.com/users/octocat"))
+                .andRespond(withSuccess(USER_JSON, MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.github.com/users/octocat/repos?per_page=100&page=1"))
+                .andRespond(withSuccess(page1Json, MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.github.com/users/octocat/repos?per_page=100&page=2"))
+                .andRespond(withSuccess(page2Json, MediaType.APPLICATION_JSON));
+
+        GithubUser result = service.getUser("octocat");
+
+        assertThat(result.getRepos()).hasSize(150);
+        mockServer.verify();
+    }
+
+    @Test
+    void getUser_cacheMiss_stopsOnEmptyPage() {
+        when(valueOps.get("github:user:octocat")).thenReturn(null);
+
+        String page1Json = buildReposJson(100, 0);
+
+        mockServer.expect(requestTo("https://api.github.com/users/octocat"))
+                .andRespond(withSuccess(USER_JSON, MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.github.com/users/octocat/repos?per_page=100&page=1"))
+                .andRespond(withSuccess(page1Json, MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.github.com/users/octocat/repos?per_page=100&page=2"))
+                .andRespond(withSuccess(REPOS_EMPTY_JSON, MediaType.APPLICATION_JSON));
+
+        GithubUser result = service.getUser("octocat");
+
+        assertThat(result.getRepos()).hasSize(100);
+        mockServer.verify();
+    }
+
+    private String buildReposJson(int count, int startIndex) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < count; i++) {
+            int idx = startIndex + i;
+            if (i > 0) sb.append(",");
+            sb.append("""
+                    {"name": "repo-%d", "url": "https://github.com/octocat/repo-%d"}
+                    """.formatted(idx, idx));
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
+    @Test
     void getUser_withPat_sendsAuthorizationHeader() {
         ObjectMapper objectMapper = new ObjectMapper()
                 .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
@@ -182,7 +236,7 @@ class GithubServiceTest {
         patMockServer.expect(requestTo("https://api.github.com/users/octocat"))
                 .andExpect(header("Authorization", "Bearer test-pat-token"))
                 .andRespond(withSuccess(USER_JSON, MediaType.APPLICATION_JSON));
-        patMockServer.expect(requestTo("https://api.github.com/users/octocat/repos"))
+        patMockServer.expect(requestTo("https://api.github.com/users/octocat/repos?per_page=100&page=1"))
                 .andRespond(withSuccess(REPOS_JSON, MediaType.APPLICATION_JSON));
 
         patService.getUser("octocat");
