@@ -48,7 +48,6 @@ public class GithubService {
             return user;
         }
 
-
         try {
             GithubUser user = getUserFromGithub(username);
             redisTemplate.opsForValue().set(cacheKey, user, CACHE_TTL_MINUTES, TimeUnit.MINUTES);
