@@ -6,6 +6,8 @@ import com.branch.app.model.GithubRepo;
 import com.branch.app.model.GithubUser;
 import com.branch.app.model.github.GithubApiRepo;
 import com.branch.app.model.github.GithubApiUser;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -24,6 +26,7 @@ import java.util.stream.Collectors;
 @Service
 public class GithubService {
 
+    private static final Logger log = LoggerFactory.getLogger(GithubService.class);
     private static final int CACHE_TTL_MINUTES = 20;
     private static final String CACHE_KEY_PREFIX = "github:user:";
     private static final String NOT_FOUND_SENTINEL = "__NOT_FOUND__";
@@ -49,21 +52,37 @@ public class GithubService {
 
     public GithubUser getUser(String username) {
         String cacheKey = CACHE_KEY_PREFIX + username;
-        Object cached = redisTemplate.opsForValue().get(cacheKey);
-        if (NOT_FOUND_SENTINEL.equals(cached)) {
-            throw new NotFoundException("GitHub User not found: " + username);
-        }
-        if (cached instanceof GithubUser user) {
-            return user;
+
+        try {
+            Object cached = redisTemplate.opsForValue().get(cacheKey);
+            if (NOT_FOUND_SENTINEL.equals(cached)) {
+                throw new NotFoundException("GitHub User not found: " + username);
+            }
+            if (cached instanceof GithubUser user) {
+                return user;
+            }
+        } catch (NotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("Redis is unavailable, fetching directly from GitHub: {}", e.getMessage());
+            return getUserFromGithub(username);
         }
 
         try {
             GithubUser user = getUserFromGithub(username);
-            redisTemplate.opsForValue().set(cacheKey, user, CACHE_TTL_MINUTES, TimeUnit.MINUTES);
+            tryCacheSet(cacheKey, user);
             return user;
         } catch (NotFoundException e) {
-            redisTemplate.opsForValue().set(cacheKey, NOT_FOUND_SENTINEL, CACHE_TTL_MINUTES, TimeUnit.MINUTES);
+            tryCacheSet(cacheKey, NOT_FOUND_SENTINEL);
             throw e;
+        }
+    }
+
+    private void tryCacheSet(String key, Object value) {
+        try {
+            redisTemplate.opsForValue().set(key, value, CACHE_TTL_MINUTES, TimeUnit.MINUTES);
+        } catch (Exception e) {
+            log.warn("Redis is unavailable, result will not be cached: {}", e.getMessage());
         }
     }
 

@@ -27,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
@@ -165,6 +166,39 @@ class GithubServiceTest {
         assertThatThrownBy(() -> service.getUser("octocat"))
                 .isInstanceOf(HttpClientErrorException.Forbidden.class)
                 .isNotInstanceOf(RateLimitException.class);
+    }
+
+    @Test
+    void getUser_redisReadFails_fetchesFromGithubAndSkipsCache() {
+        when(valueOps.get("github:user:octocat")).thenThrow(new RuntimeException("Connection refused"));
+
+        mockServer.expect(requestTo("https://api.github.com/users/octocat"))
+                .andRespond(withSuccess(USER_JSON, MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.github.com/users/octocat/repos?per_page=100&page=1"))
+                .andRespond(withSuccess(REPOS_JSON, MediaType.APPLICATION_JSON));
+
+        GithubUser result = service.getUser("octocat");
+
+        assertThat(result.getUserName()).isEqualTo("octocat");
+        verify(valueOps, never()).set(any(), any(), anyLong(), any(TimeUnit.class));
+        mockServer.verify();
+    }
+
+    @Test
+    void getUser_redisWriteFails_stillReturnsUser() {
+        when(valueOps.get("github:user:octocat")).thenReturn(null);
+        org.mockito.Mockito.doThrow(new RuntimeException("Connection refused"))
+                .when(valueOps).set(any(), any(), anyLong(), any(TimeUnit.class));
+
+        mockServer.expect(requestTo("https://api.github.com/users/octocat"))
+                .andRespond(withSuccess(USER_JSON, MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.github.com/users/octocat/repos?per_page=100&page=1"))
+                .andRespond(withSuccess(REPOS_JSON, MediaType.APPLICATION_JSON));
+
+        GithubUser result = service.getUser("octocat");
+
+        assertThat(result.getUserName()).isEqualTo("octocat");
+        mockServer.verify();
     }
 
     @Test
