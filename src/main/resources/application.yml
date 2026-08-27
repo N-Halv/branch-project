@@ -1,3 +1,6 @@
+github:
+  token: ${GITHUB_TOKEN:}
+
 spring:
   jackson:
     property-naming-strategy: SNAKE_CASE

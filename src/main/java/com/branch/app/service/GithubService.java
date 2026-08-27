@@ -6,6 +6,7 @@ import com.branch.app.model.GithubRepo;
 import com.branch.app.model.GithubUser;
 import com.branch.app.model.github.GithubApiRepo;
 import com.branch.app.model.github.GithubApiUser;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
@@ -30,12 +31,19 @@ public class GithubService {
     private final RestClient restClient;
     private final RedisTemplate<String, Object> redisTemplate;
 
-    public GithubService(RestClient.Builder builder, RedisTemplate<String, Object> redisTemplate) {
-        this.restClient = builder
+    public GithubService(RestClient.Builder builder,
+                         RedisTemplate<String, Object> redisTemplate,
+                         @Value("${github.token:}") String githubToken) {
+        RestClient.Builder clientBuilder = builder
                 .baseUrl("https://api.github.com")
                 .defaultHeader("User-Agent", "branch-app")
-                .defaultHeader("Accept", "application/vnd.github+json")
-                .build();
+                .defaultHeader("Accept", "application/vnd.github+json");
+
+        if (!githubToken.isBlank()) {
+            clientBuilder.defaultHeader("Authorization", "Bearer " + githubToken);
+        }
+
+        this.restClient = clientBuilder.build();
         this.redisTemplate = redisTemplate;
     }
 
