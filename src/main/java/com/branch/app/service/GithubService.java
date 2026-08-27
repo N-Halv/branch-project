@@ -17,8 +17,6 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -63,11 +61,8 @@ public class GithubService {
 
 
     public GithubUser getUserFromGithub(String username) {
-        CompletableFuture<GithubApiUser> userFuture = CompletableFuture.supplyAsync(() -> fetchUser(username));
-        CompletableFuture<List<GithubApiRepo>> reposFuture = CompletableFuture.supplyAsync(() -> fetchRepos(username));
-
-        GithubApiUser apiUser = joinOrRethrow(userFuture);
-        List<GithubApiRepo> apiRepos = joinOrRethrow(reposFuture);
+        GithubApiUser apiUser = fetchUser(username);
+        List<GithubApiRepo> apiRepos = fetchRepos(username);
 
         List<GithubRepo> repos = apiRepos.stream()
                 .map(r -> GithubRepo.builder().name(r.getName()).url(r.getUrl()).build())
@@ -134,21 +129,6 @@ public class GithubService {
             return new RateLimitException("GitHub API rate limit of " + limitHeader + " exceeded. Resets at: " + resetTime);
         }
         return new RateLimitException("GitHub API rate limit exceeded");
-    }
-
-    private <T> T joinOrRethrow(CompletableFuture<T> future) {
-        try {
-            return future.join();
-        } catch (CompletionException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof NotFoundException nfe) {
-                throw nfe;
-            }
-            if (cause instanceof RuntimeException re) {
-                throw re;
-            }
-            throw e;
-        }
     }
 
     private String formatDate(String isoDate) {
