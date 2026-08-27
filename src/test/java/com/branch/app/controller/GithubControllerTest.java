@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -27,6 +28,10 @@ class GithubControllerTest {
 
     @MockBean
     private GithubService githubService;
+
+    @MockBean
+    @SuppressWarnings("rawtypes")
+    private RedisTemplate redisTemplate;
 
     private static final GithubUser TEST_USER = GithubUser.builder()
             .userName("octocat")
