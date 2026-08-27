@@ -1,6 +1,7 @@
 package com.branch.app.service;
 
 import com.branch.app.exception.NotFoundException;
+import com.branch.app.exception.RateLimitException;
 import com.branch.app.model.GithubRepo;
 import com.branch.app.model.GithubUser;
 import com.branch.app.model.github.GithubApiRepo;
@@ -10,6 +11,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
+import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
@@ -92,6 +95,8 @@ public class GithubService {
                     .body(GithubApiUser.class);
         } catch (HttpClientErrorException.NotFound e) {
             throw new NotFoundException("GitHub User not found: " + username);
+        } catch (HttpClientErrorException.Forbidden e) {
+            throw buildRateLimitException(e);
         }
     }
 
@@ -104,7 +109,31 @@ public class GithubService {
             return repos != null ? Arrays.asList(repos) : List.of();
         } catch (HttpClientErrorException.NotFound e) {
             throw new NotFoundException("GitHub User not found: " + username);
+        } catch (HttpClientErrorException.Forbidden e) {
+            throw buildRateLimitException(e);
         }
+    }
+
+    private RuntimeException buildRateLimitException(HttpClientErrorException.Forbidden e) {
+        var headers = e.getResponseHeaders();
+        if (headers == null) {
+            return e;
+        }
+
+        String resetRemainingHeader = headers.getFirst("X-RateLimit-Remaining");
+        String resetTimeHeader = headers.getFirst("X-RateLimit-Reset");
+        String limitHeader = headers.getFirst("x-ratelimit-limit");
+
+        if (!"0".equals(resetRemainingHeader)) {
+            return e;
+        }
+
+        if (resetTimeHeader != null) {
+            String resetTime = DateTimeFormatter.RFC_1123_DATE_TIME.format(
+                    Instant.ofEpochSecond(Long.parseLong(resetTimeHeader)).atZone(ZoneId.of("UTC")));
+            return new RateLimitException("GitHub API rate limit of " + limitHeader + " exceeded. Resets at: " + resetTime);
+        }
+        return new RateLimitException("GitHub API rate limit exceeded");
     }
 
     private <T> T joinOrRethrow(CompletableFuture<T> future) {
