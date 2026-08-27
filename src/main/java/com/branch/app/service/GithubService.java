@@ -5,6 +5,7 @@ import com.branch.app.model.GithubRepo;
 import com.branch.app.model.GithubUser;
 import com.branch.app.model.github.GithubApiRepo;
 import com.branch.app.model.github.GithubApiUser;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
@@ -15,22 +16,51 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
 public class GithubService {
 
-    private final RestClient restClient;
+    private static final int CACHE_TTL_MINUTES = 20;
+    private static final String CACHE_KEY_PREFIX = "github:user:";
+    private static final String NOT_FOUND_SENTINEL = "__NOT_FOUND__";
 
-    public GithubService(RestClient.Builder builder) {
+    private final RestClient restClient;
+    private final RedisTemplate<String, Object> redisTemplate;
+
+    public GithubService(RestClient.Builder builder, RedisTemplate<String, Object> redisTemplate) {
         this.restClient = builder
                 .baseUrl("https://api.github.com")
                 .defaultHeader("User-Agent", "branch-app")
                 .defaultHeader("Accept", "application/vnd.github+json")
                 .build();
+        this.redisTemplate = redisTemplate;
     }
 
     public GithubUser getUser(String username) {
+        String cacheKey = CACHE_KEY_PREFIX + username;
+        Object cached = redisTemplate.opsForValue().get(cacheKey);
+        if (NOT_FOUND_SENTINEL.equals(cached)) {
+            throw new NotFoundException("GitHub User not found: " + username);
+        }
+        if (cached instanceof GithubUser user) {
+            return user;
+        }
+
+
+        try {
+            GithubUser user = getUserFromGithub(username);
+            redisTemplate.opsForValue().set(cacheKey, user, CACHE_TTL_MINUTES, TimeUnit.MINUTES);
+            return user;
+        } catch (NotFoundException e) {
+            redisTemplate.opsForValue().set(cacheKey, NOT_FOUND_SENTINEL, CACHE_TTL_MINUTES, TimeUnit.MINUTES);
+            throw e;
+        }
+    }
+
+
+    public GithubUser getUserFromGithub(String username) {
         CompletableFuture<GithubApiUser> userFuture = CompletableFuture.supplyAsync(() -> fetchUser(username));
         CompletableFuture<List<GithubApiRepo>> reposFuture = CompletableFuture.supplyAsync(() -> fetchRepos(username));
 
@@ -41,7 +71,7 @@ public class GithubService {
                 .map(r -> GithubRepo.builder().name(r.getName()).url(r.getUrl()).build())
                 .collect(Collectors.toList());
 
-        return GithubUser.builder()
+        GithubUser user = GithubUser.builder()
                 .userName(apiUser.getLogin())
                 .displayName(apiUser.getName())
                 .avatar(apiUser.getAvatarUrl())
@@ -51,6 +81,8 @@ public class GithubService {
                 .createdAt(formatDate(apiUser.getCreatedAt()))
                 .repos(repos)
                 .build();
+
+        return user;
     }
 
     private GithubApiUser fetchUser(String username) {
