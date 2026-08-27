@@ -10,13 +10,18 @@ services:
       retries: 5
 
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
     ports:
       - "8080:8080"
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ""
+    volumes:
+      - .:/app
+      - ~/.m2:/root/.m2
     depends_on:
       redis:
         condition: service_healthy
