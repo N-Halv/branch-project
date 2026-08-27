@@ -19,8 +19,7 @@ This starts the Spring Boot app on port `8080` and a Redis instance on port `637
 Providing a GitHub Personal Access Token raises the API rate limit from 60 to 5,000 requests per hour.
 
 ```bash
-export GITHUB_TOKEN=github_pat_...
-docker compose up --build
+GITHUB_TOKEN=ghp_<TOKEN> docker compose up --build
 ```
 
 ## Environment variables
@@ -32,11 +31,28 @@ docker compose up --build
 | `REDIS_PASSWORD` | _(empty)_ | Redis password |
 | `GITHUB_TOKEN` | _(empty)_ | GitHub Personal Access Token |
 
+## Clearing Redis
+We use redis for caching requests from Github and for keeping track of ratelimiting so it might be useful to flush clear redis data when developing locally.
+```bash
+docker compose exec redis redis-cli FLUSHALL
+```
+
 ## Running tests
 
 ```bash
 docker compose run --rm test
 ```
+
+## Rate limiting
+
+Requests are rate limited per IP address to **100 requests per 30-minute window**, tracked in Redis. Every response includes the following headers:
+
+| Header | Description |
+|---|---|
+| `X-RateLimit-Limit` | Maximum requests allowed per window |
+| `X-RateLimit-Remaining` | Requests remaining in the current window |
+
+When the limit is exceeded, the API returns `429 Too Many Requests`. The window resets automatically after 30 minutes. If Redis is unavailable, rate limiting is bypassed and requests are allowed through.
 
 ## API
 
